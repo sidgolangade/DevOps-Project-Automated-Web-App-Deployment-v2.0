@@ -1,0 +1,76 @@
+- name: Deploy Django App to OpenShift
+  hosts: localhost
+  gather_facts: false
+
+  vars:
+    openshift_token: "{{ lookup('env', 'OPENSHIFT_TOKEN') }}"
+    openshift_server_url: "https://console-openshift-console.apps.sg-rhocp-cluster.cp.fyre.ibm.com/"
+    openshift_project: "WebAppDeployment"
+    app_name: "FoodOrderApp"
+    docker_image: "{{ sids-private-repo }}/{{ FoodOrderApp }}:latest"
+
+  tasks:
+    - name: Log in to OpenShift
+      openshift_login:
+        server_url: "{{ openshift_server_url }}"
+        token: "{{ openshift_token }}"
+        validate_certs: no
+      delegate_to: localhost
+      register: login_result
+
+    - name: Check if the project exists, create if not
+      openshift_project:
+        name: "{{ openshift_project }}"
+        state: present
+      delegate_to: localhost
+      register: project_result
+
+    - name: Deploy the Django app from Docker Hub
+      openshift_app:
+        state: present
+        namespace: "{{ openshift_project }}"
+        name: "{{ app_name }}"
+        image: "{{ docker_image }}"
+      delegate_to: localhost
+      when: login_result.rc == 0
+
+    - name: Expose the service
+      openshift_service_facts:
+        namespace: "{{ openshift_project }}"
+      delegate_to: localhost
+      register: service_facts_result
+
+    - name: Create a route
+      openshift_route:
+        namespace: "{{ openshift_project }}"
+        name: "{{ app_name }}"
+        service: "{{ service_facts_result.services[app_name]['metadata']['name'] }}"
+        hostname: "{{ app_name }}.your-openshift-app-domain.com"
+      delegate_to: localhost
+      when: login_result.rc == 0
+
+    - name: Wait for deployment to complete
+      openshift_wait_for:
+        state: present
+        kind: DeploymentConfig
+        name: "{{ app_name }}"
+        namespace: "{{ openshift_project }}"
+      delegate_to: localhost
+      when: login_result.rc == 0
+
+    - name: Set environment variables
+      openshift_deployment_config:
+        state: present
+        name: "{{ app_name }}"
+        namespace: "{{ openshift_project }}"
+        container: "{{ app_name }}"
+        env:
+          - name: DJANGO_SETTINGS_MODULE
+            value: "your_project_name.settings.production"
+      delegate_to: localhost
+      when: login_result.rc == 0
+
+    - name: Display route URL
+      debug:
+        var: "https://{{ app_name }}.your-openshift-app-domain.com"
+      when: login_result.rc == 0

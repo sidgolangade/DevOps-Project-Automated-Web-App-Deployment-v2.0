@@ -1,0 +1,120 @@
+pipeline {
+    agent { label 'All-Purpose-agent' } // Use your single agent label for most stages
+
+    parameters {
+        string(name: 'DOCKER_IMAGE', description: 'Docker image name', defaultValue: 'FoodOrderApp')
+        string(name: 'DOCKER_HUB_REPO', description: 'Docker Hub repository name', defaultValue: 'sids-private-repo')
+        booleanParam(name: 'DEPLOY_TO_OPENSHIFT', defaultValue: true, description: 'Deploy to OpenShift using Ansible')
+    }
+
+    stages {
+        stage('Checkout') {
+            steps {
+                checkout scm
+            }
+        }
+
+        stage('Build Docker Image') {
+            steps {
+                script {
+                    try {
+                        // Build the Docker image
+                        docker.build(env.DOCKER_IMAGE)
+                    } catch (Exception e) {
+                        currentBuild.result = 'FAILURE'
+                        throw e
+                    }
+                }
+            }
+        }
+
+        stage('Unit Tests') {
+            steps {
+                script {
+                    // Create a container from the Docker image
+                    def unitTestContainer = docker.image(env.DOCKER_IMAGE).run("--rm -itd")
+                    try {
+                        // Run unit tests inside the container
+                        sh "docker exec -it ${unitTestContainer.id} python manage.py test"
+                    } finally {
+                        // Stop and remove the container when done
+                        unitTestContainer.stop()
+                    }
+                }
+            }
+        }
+
+        stage('Integration Tests') {
+            steps {
+                script {
+                    // Create a container from the Docker image
+                    def integrationTestContainer = docker.image(env.DOCKER_IMAGE).run("--rm -itd")
+                    try {
+                        // Run integration tests inside the container
+                        sh "docker exec -it ${integrationTestContainer.id} pytest --ds=FoodProject.settings --junitxml=/var/lib/jenkins/test-reports/integration-tests.xml"
+                    } finally {
+                        // Stop and remove the container when done
+                        integrationTestContainer.stop()
+                    }
+                }
+            }
+        }
+
+        stage('Push Docker Image to Docker Hub') {
+            steps {
+                script {
+                    try {
+                        // Log in to Docker Hub (use Jenkins Credentials Plugin for Docker Hub credentials)
+                        withCredentials([[$class: 'UsernamePasswordMultiBinding', credentialsId: 'your-docker-hub-credentials-id', usernameVariable: 'DOCKER_HUB_USERNAME', passwordVariable: 'DOCKER_HUB_PASSWORD']]) {
+                            sh "docker login -u $DOCKER_HUB_USERNAME -p $DOCKER_HUB_PASSWORD"
+                        }
+
+                        // Push the Docker image to Docker Hub repository
+                        sh "docker push ${env.DOCKER_HUB_REPO}/${env.DOCKER_IMAGE}:latest"
+                    } catch (Exception e) {
+                        currentBuild.result = 'FAILURE'
+                        throw e
+                    }
+                }
+            }
+        }
+
+
+        stage('Deploy to OpenShift using Ansible') {
+            agent { label 'Ansible-agent' } // Use your Ansible agent label
+            when {
+                expression { params.DEPLOY_TO_OPENSHIFT }
+            }
+            steps {
+                script {
+                    try {
+                        // Use SSH to connect to Ansible Server and run the Ansible playbook
+                        sshPublisher(
+                            publishers: [
+                                sshPublisherDesc(
+                                    configName: 'your-ssh-config-name', // Jenkins SSH credentials for Ansible Server
+                                    transfers: [
+                                        sshTransfer(
+                                            execCommand: 'ansible-playbook -i /path/to/ansible_hosts /path/to/deploy.yaml',
+                                            execTimeout: 120000,
+                                        )
+                                    ]
+                                )
+                            ]
+                        )
+                    } catch (Exception e) {
+                        currentBuild.result = 'FAILURE'
+                        throw e
+                    }
+                }
+            }
+        }
+    }
+
+    post {
+        always {
+            // Clean up Docker images (optional)
+            deleteDir()
+        }
+    }
+}
