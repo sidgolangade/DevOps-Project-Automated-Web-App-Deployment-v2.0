@@ -7,5 +7,5 @@
 This DevOps project aims to automate the deployment process of a Python-Django web application using a combination of tools and technologies such as AWS, Terraform, Jenkins, Ansible, Docker, OpenShift, Nginx, Git/GitHub, etc. 
 
 ## Project Architecture
-![Project Architecture](https://github.com/sidgolangade/DevOps-Project-Automated-Web-App-Deployment-v2.0/blob/main/Automated%20Web%20App%20Deployment%20%E2%80%93%20v2.0.png)
+![Project Architecture](https://github.com/sidgolangade/DevOps-Project-Automated-Web-App-Deployment-v2.0/blob/main/DevOps%20Project%20Architecture%20-%20v2.0.png)
 
